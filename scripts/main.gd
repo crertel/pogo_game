@@ -227,9 +227,13 @@ func _update_debug_label() -> void:
 		player_velocity = _player.velocity
 		is_grounded = _player.is_on_floor()
 
+	var background_text := "none"
+	if _world_builder != null and _world_builder.has_method("get_background_debug_text"):
+		background_text = _world_builder.get_background_debug_text()
+
 	_debug_label.text = (
 		"F3/Tab debug  G regenerate  N advance  M transition\n"
-		+ "level: %d/%d %s/%s  %s  seed: %d  hexes: %d  fps: %d\n"
+		+ "level: %d/%d %s/%s  %s  bg: %s  seed: %d  hexes: %d  fps: %d\n"
 		+ "max step: %.2fm  max climb/drop: %.2f/%.2fm\n"
 		+ "player: %.1f, %.1f, %.1f  vel: %.1f  grounded: %s\n"
 			+ "double: %s  bunny: x%.2f  grapple: %s"
@@ -239,6 +243,7 @@ func _update_debug_label() -> void:
 		str(_level_tuning.get("arc_name", "")),
 		str(_level_tuning.get("phase_name", "")),
 		_active_mechanics_text(),
+		background_text,
 		_level_seed,
 		_bridge_points.size(),
 		Engine.get_frames_per_second(),
