@@ -15,9 +15,11 @@ const BUNNY_CHAIN_BOOST := 1.16
 const BUNNY_MAX_MULTIPLIER := 1.65
 const BUNNY_MIN_SPEED := 4.2
 const DOUBLE_RECHARGE_TIME := 0.35
-const GRAPPLE_PULL := 84.0
+const GRAPPLE_SPRING_CONSTANT := 12.0
+const GRAPPLE_DAMPING := 3.5
 const GRAPPLE_UPWARD_LIFT := 4.5
-const GRAPPLE_RANGE := 28.0
+const GRAPPLE_RANGE := 18.0
+const GRAPPLE_REST_LENGTH := 3.0
 const GRAPPLE_MISS_FLASH_TIME := 0.16
 
 @onready var _head: Node3D = $Head
@@ -174,9 +176,17 @@ func _apply_grapple(delta: float) -> void:
 	if not _grapple_attached:
 		return
 
+	var offset := _grapple_target - global_position
+	var distance := offset.length()
+	var displacement := distance - GRAPPLE_REST_LENGTH
+	if displacement <= 0.0:
+		return
+
 	_grapple_active = true
-	var pull := (_grapple_target - global_position).normalized()
-	velocity += pull * GRAPPLE_PULL * delta
+	var pull_direction := offset / distance
+	var rope_velocity := velocity.dot(pull_direction)
+	var spring_force := maxf(displacement * GRAPPLE_SPRING_CONSTANT - rope_velocity * GRAPPLE_DAMPING, 0.0)
+	velocity += pull_direction * spring_force * delta
 	velocity.y += GRAPPLE_UPWARD_LIFT * delta
 
 
