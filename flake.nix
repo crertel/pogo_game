@@ -25,6 +25,27 @@
           lib = pkgs.lib;
 
           godot = pkgs.godot_4;
+          isLinux = pkgs.stdenv.hostPlatform.isLinux;
+          linuxRuntimeLibs = lib.optionals isLinux [
+            pkgs.glibc
+            pkgs.alsa-lib
+            pkgs.dbus
+            pkgs.libdecor
+            pkgs.libglvnd
+            pkgs.libpulseaudio
+            pkgs.libxkbcommon
+            pkgs.udev
+            pkgs.vulkan-loader
+            pkgs.wayland
+            pkgs.libx11
+            pkgs.libxcursor
+            pkgs.libxext
+            pkgs.libxfixes
+            pkgs.libxi
+            pkgs.libxinerama
+            pkgs.libxrandr
+            pkgs.libxrender
+          ];
           godotExportTemplates =
             if pkgs ? "godot_4-export-templates-bin" then
               pkgs."godot_4-export-templates-bin"
@@ -40,10 +61,13 @@
                 godot
                 pkgs.just
               ]
+              ++ lib.optional isLinux pkgs.patchelf
               ++ lib.optional (pkgs ? gdtoolkit) pkgs.gdtoolkit
               ++ lib.optional (godotExportTemplates != null) godotExportTemplates;
 
             GODOT_BIN = lib.getExe godot;
+            GODOT_LINUX_INTERPRETER = lib.optionalString isLinux "${pkgs.glibc}/lib/ld-linux-x86-64.so.2";
+            GODOT_LINUX_RPATH = lib.optionalString isLinux (lib.makeLibraryPath linuxRuntimeLibs);
 
             shellHook =
               ''
@@ -65,6 +89,7 @@
                 echo "  just run    # play the prototype"
                 echo "  just edit   # open Godot editor"
                 echo "  just check  # headless smoke check"
+                echo "  just build  # export a Linux executable to build/"
                 echo ""
                 echo "Debug keys in-game: Tab overlay, G reroll, N skip, M transition"
               '';
