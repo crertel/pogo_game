@@ -6,7 +6,7 @@
   };
 
   outputs =
-    { nixpkgs, ... }:
+    { self, nixpkgs, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -18,6 +18,37 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
     in
     {
+      apps = forAllSystems (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          runner = pkgs.writeShellApplication {
+            name = "pogo-chasm";
+            runtimeInputs = [ pkgs.godot_4 ];
+            text = ''
+              project_dir="''${POGO_CHASM_PROJECT_DIR:-$PWD}"
+              if [ ! -f "$project_dir/project.godot" ]; then
+                project_dir="${self}"
+              fi
+
+              state_dir="''${POGO_CHASM_STATE_DIR:-$PWD/.godot/nix-run}"
+              mkdir -p "$state_dir/xdg-data" "$state_dir/xdg-config" "$state_dir/xdg-cache"
+              export XDG_DATA_HOME="$state_dir/xdg-data"
+              export XDG_CONFIG_HOME="$state_dir/xdg-config"
+              export XDG_CACHE_HOME="$state_dir/xdg-cache"
+
+              exec godot --path "$project_dir" "$@"
+            '';
+          };
+        in
+        {
+          default = {
+            type = "app";
+            program = "${runner}/bin/pogo-chasm";
+          };
+        }
+      );
+
       devShells = forAllSystems (
         system:
         let
