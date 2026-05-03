@@ -44,6 +44,14 @@ var _rope_material: StandardMaterial3D
 
 func _ready() -> void:
 	_spawn_transform = global_transform
+
+
+func set_spawn_transform(spawn_transform: Transform3D) -> void:
+	_spawn_transform = spawn_transform
+	global_transform = _spawn_transform
+	velocity = Vector3.ZERO
+	_pitch = 0.0
+	_head.rotation.x = 0.0
 	_rope_material = StandardMaterial3D.new()
 	_rope_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_rope_material.albedo_color = Color("#80e8ff")

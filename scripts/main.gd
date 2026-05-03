@@ -3,6 +3,7 @@ extends Node3D
 const PlayerScene := preload("res://scenes/player.tscn")
 const VoidFogShader := preload("res://shaders/void_fog.gdshader")
 const MechanicHudScript := preload("res://scripts/mechanic_hud.gd")
+const TransitionOverlayScript := preload("res://scripts/transition_overlay.gd")
 
 const HEX_RADIUS := 1.55
 const HEX_HEIGHT := 0.55
@@ -26,7 +27,9 @@ var _player: CharacterBody3D
 var _status_label: Label
 var _debug_label: Label
 var _mechanic_hud: Control
-var _debug_visible := true
+var _transition_overlay: Control
+var _debug_visible := false
+var _transitioning := false
 var _has_won := false
 var _platform_materials: Array[StandardMaterial3D] = []
 var _bridge_points: Array[Vector3] = []
@@ -41,9 +44,11 @@ var _level_tuning := {}
 var _max_step_distance := 0.0
 var _max_step_height := 0.0
 var _min_step_drop := 0.0
+var _run_started_msec := 0
 
 
 func _ready() -> void:
+	_run_started_msec = Time.get_ticks_msec()
 	_build_materials()
 	_build_world()
 	_spawn_player()
@@ -52,12 +57,17 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _transitioning:
+		return
+
 	if event.is_action_pressed("restart"):
 		get_tree().reload_current_scene()
 	elif event.is_action_pressed("regenerate_level"):
 		_regenerate_level()
 	elif event.is_action_pressed("advance_phase"):
 		_debug_advance_phase()
+	elif event.is_action_pressed("force_phase_end"):
+		_debug_force_phase_end()
 	elif event.is_action_pressed("toggle_debug"):
 		_toggle_debug()
 	elif event.is_action_pressed("ui_cancel"):
@@ -67,7 +77,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(_delta: float) -> void:
-	if _player != null and _player.global_position.y < FALL_LIMIT and not _has_won and not _run_complete:
+	if _player != null and _player.global_position.y < FALL_LIMIT and not _has_won and not _run_complete and not _transitioning:
 		_player.respawn()
 
 
@@ -153,7 +163,10 @@ func _build_level(seed: int) -> void:
 	if _player != null:
 		if _player.has_method("set_mechanics"):
 			_player.set_mechanics(_level_tuning.get("mechanics", {}))
-		_player.position = START_POINT + Vector3(-3.2, 2.2, 0.0)
+		if _player.has_method("set_spawn_transform"):
+			_player.set_spawn_transform(_get_player_spawn_transform())
+		else:
+			_player.global_transform = _get_player_spawn_transform()
 		_player.respawn()
 
 
@@ -168,6 +181,43 @@ func _advance_level() -> void:
 
 	_level_index += 1
 	_build_level(randi())
+
+
+func _transition_to_next_level() -> void:
+	_transitioning = true
+	var next_level := _level_index + 1
+	var run_time := _format_run_time((Time.get_ticks_msec() - _run_started_msec) / 1000.0)
+	var stage_title := "Run Complete"
+	var progress_text := "24/24"
+	var koan_text := "The bridge remembers every crossing."
+
+	if next_level <= TOTAL_LEVELS:
+		var next_tuning := _get_level_tuning(next_level)
+		stage_title = "%s %s" % [
+			str(next_tuning.get("arc_name", "")),
+			str(next_tuning.get("phase_name", "")),
+		]
+		progress_text = "%d/%d" % [next_level, TOTAL_LEVELS]
+		koan_text = _koan_for_tuning(next_tuning)
+
+	_transition_overlay.set_transition_text(run_time, stage_title, progress_text, koan_text)
+	await _transition_overlay.burn_to_black()
+	await _transition_overlay.show_text()
+	await get_tree().create_timer(0.85).timeout
+
+	if _level_index >= TOTAL_LEVELS:
+		_run_complete = true
+		_has_won = true
+		if _status_label != null:
+			_status_label.text = "Run complete. R restarts from level 1."
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	else:
+		_level_index = next_level
+		_build_level(randi())
+
+	await _transition_overlay.hide_text()
+	await _transition_overlay.burn_from_black()
+	_transitioning = false
 
 
 func _add_environment() -> void:
@@ -193,7 +243,6 @@ func _add_environment() -> void:
 
 
 func _add_start_pad() -> void:
-	_add_hex_platform(START_POINT + Vector3(-3.2, 0.0, 0.0), HEX_RADIUS * 1.35, Color("#3f8f67"))
 	_add_hex_platform(START_POINT, HEX_RADIUS * 1.35, Color("#3f8f67"))
 
 
@@ -447,10 +496,20 @@ func _add_fireflies() -> void:
 
 func _spawn_player() -> void:
 	_player = PlayerScene.instantiate()
-	_player.position = START_POINT + Vector3(-3.2, 2.2, 0.0)
 	add_child(_player)
+	if _player.has_method("set_spawn_transform"):
+		_player.set_spawn_transform(_get_player_spawn_transform())
+	else:
+		_player.global_transform = _get_player_spawn_transform()
 	if _player.has_method("set_mechanics"):
 		_player.set_mechanics(_level_tuning.get("mechanics", {}))
+
+
+func _get_player_spawn_transform() -> Transform3D:
+	var spawn := Transform3D.IDENTITY
+	spawn.origin = START_POINT + Vector3(0.0, 2.2, 0.0)
+	spawn.basis = Basis(Vector3.UP, deg_to_rad(-90.0))
+	return spawn
 
 
 func _build_ui() -> void:
@@ -475,6 +534,11 @@ func _build_ui() -> void:
 	_mechanic_hud.set_anchors_preset(Control.PRESET_CENTER)
 	_mechanic_hud.position = Vector2(-42.0, -42.0)
 	canvas.add_child(_mechanic_hud)
+
+	_transition_overlay = Control.new()
+	_transition_overlay.set_script(TransitionOverlayScript)
+	_transition_overlay.z_index = 100
+	canvas.add_child(_transition_overlay)
 
 
 func _make_material(color: Color) -> StandardMaterial3D:
@@ -575,9 +639,9 @@ func _generate_vertical_profile(rng: RandomNumberGenerator) -> Array[float]:
 	return heights
 
 
-func _get_level_tuning() -> Dictionary:
-	var arc := int((_level_index - 1) / 3)
-	var phase := int((_level_index - 1) % 3)
+func _get_level_tuning(level_index := _level_index) -> Dictionary:
+	var arc := int((level_index - 1) / 3)
+	var phase := int((level_index - 1) % 3)
 	var mechanic_index := int(arc / 2)
 	var is_combo_arc := arc % 2 == 1
 	var mechanic_names := ["Double Jump", "Bunny Hop", "Grapple", "Exploding Hexes"]
@@ -746,7 +810,7 @@ func _update_debug_label() -> void:
 		_mechanic_hud.set_state(player_state)
 
 	_debug_label.text = (
-		"F3/Tab debug  G regenerate  N advance\n"
+		"F3/Tab debug  G regenerate  N advance  M transition\n"
 		+ "level: %d/%d %s/%s  %s  seed: %d  hexes: %d  fps: %d\n"
 		+ "max step: %.2fm  max climb/drop: %.2f/%.2fm\n"
 		+ "player: %.1f, %.1f, %.1f  vel: %.1f  grounded: %s\n"
@@ -801,6 +865,9 @@ func _toggle_debug() -> void:
 
 
 func _debug_advance_phase() -> void:
+	if _transitioning:
+		return
+
 	if _run_complete:
 		_level_index = 1
 		_run_complete = false
@@ -815,11 +882,67 @@ func _debug_advance_phase() -> void:
 	_build_level(randi())
 
 
+func _debug_force_phase_end() -> void:
+	if _transitioning or _run_complete:
+		return
+
+	_has_won = true
+	if _status_label != null:
+		_status_label.text = "Debug phase end."
+	call_deferred("_transition_to_next_level")
+
+
+func _format_run_time(seconds: float) -> String:
+	var total_centiseconds := int(seconds * 100.0)
+	var minutes := int(total_centiseconds / 6000)
+	var remaining := total_centiseconds % 6000
+	var whole_seconds := int(remaining / 100)
+	var centiseconds := remaining % 100
+	return "%02d:%02d.%02d" % [minutes, whole_seconds, centiseconds]
+
+
+func _koan_for_tuning(tuning: Dictionary) -> String:
+	var mechanic := str(tuning.get("arc_name", ""))
+	var phase := str(tuning.get("phase_name", ""))
+	var combo := bool(tuning.get("combo", false))
+
+	if combo and phase == "master":
+		return "All tools are one motion."
+
+	match mechanic:
+		"Double Jump":
+			return {
+				"new": "The second step begins in empty air.",
+				"practice": "Rise after the first answer.",
+				"master": "Do not spend the sky too soon.",
+			}.get(phase, "The air keeps one promise.")
+		"Bunny Hop":
+			return {
+				"new": "Stillness loses speed.",
+				"practice": "The floor is a drum; answer quickly.",
+				"master": "Momentum is a path you keep choosing.",
+			}.get(phase, "Speed gathers where doubt does not.")
+		"Grapple":
+			return {
+				"new": "Reach before you leap.",
+				"practice": "A distant point can be a handhold.",
+				"master": "Pull the future toward you.",
+			}.get(phase, "The hook finds what the eye believes.")
+		"Exploding Hexes":
+			return {
+				"new": "Some ground is only a moment.",
+				"practice": "Trust the step, then abandon it.",
+				"master": "Leave nothing behind but falling stone.",
+			}.get(phase, "A bridge may burn and still be crossed.")
+
+	return "Crossing changes the crosser."
+
+
 func _update_status_label() -> void:
 	if _status_label == null:
 		return
 
-	_status_label.text = "Level %d/%d: %s %s. %s N skips." % [
+	_status_label.text = "Level %d/%d: %s %s. %s N skips, M transitions." % [
 		_level_index,
 		TOTAL_LEVELS,
 		str(_level_tuning.get("arc_name", "")),
@@ -861,7 +984,7 @@ func _on_goal_body_entered(body: Node3D) -> void:
 	if body == _player and not _has_won:
 		_has_won = true
 		_status_label.text = "Level %d clear." % _level_index
-		call_deferred("_advance_level")
+		call_deferred("_transition_to_next_level")
 
 
 func _on_exploding_hex_entered(body: Node3D, platform: StaticBody3D) -> void:
