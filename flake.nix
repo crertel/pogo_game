@@ -59,8 +59,14 @@
 
                 alias godot="$GODOT_BIN"
 
-                echo "Godot dev shell ready."
-                echo "Run: godot --editor"
+                echo "Pogo Chasm dev shell"
+                echo ""
+                echo "Commands:"
+                echo "  just run    # play the prototype"
+                echo "  just edit   # open Godot editor"
+                echo "  just check  # headless smoke check"
+                echo ""
+                echo "Debug keys in-game: Tab overlay, G reroll, N skip, M transition"
               '';
           };
         }

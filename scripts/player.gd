@@ -1,5 +1,7 @@
 extends CharacterBody3D
 
+signal landed
+
 const SPEED := 8.6
 const AIR_SPEED := 6.8
 const JUMP_VELOCITY := 8.2
@@ -131,7 +133,10 @@ func _physics_process(delta: float) -> void:
 	_update_rope_visual()
 
 	move_and_slide()
-	_was_on_floor = is_on_floor()
+	var now_on_floor := is_on_floor()
+	if now_on_floor and not _was_on_floor:
+		landed.emit()
+	_was_on_floor = now_on_floor
 
 
 func respawn() -> void:

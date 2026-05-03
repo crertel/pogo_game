@@ -2,6 +2,7 @@ extends Node3D
 
 const PlayerScene := preload("res://scenes/player.tscn")
 const VoidFogShader := preload("res://shaders/void_fog.gdshader")
+const CliffRippleShader := preload("res://shaders/cliff_ripple.gdshader")
 const MechanicHudScript := preload("res://scripts/mechanic_hud.gd")
 const TransitionOverlayScript := preload("res://scripts/transition_overlay.gd")
 
@@ -36,6 +37,8 @@ var _bridge_points: Array[Vector3] = []
 var _fog_bands: Array[Node3D] = []
 var _void_lights: Array[Dictionary] = []
 var _fireflies: Array[Dictionary] = []
+var _goal_sprays: Array[Node3D] = []
+var _companion_glowbugs: Array[Dictionary] = []
 var _world_root: Node3D
 var _level_seed := 0
 var _level_index := 1
@@ -106,6 +109,12 @@ func _process(delta: float) -> void:
 		var bob := Vector3(0.0, sin(phase) * 0.22, cos(phase * 0.7) * 0.18)
 		bug.position = entry["origin"] as Vector3 + bob
 
+	for index in _goal_sprays.size():
+		_goal_sprays[index].rotate_y(delta * (0.45 + float(index % 3) * 0.08))
+
+	_update_companion_glowbugs(delta, elapsed)
+
+	_update_mechanic_hud()
 	_update_debug_label()
 
 
@@ -144,6 +153,7 @@ func _build_level(seed: int) -> void:
 	_fog_bands.clear()
 	_void_lights.clear()
 	_fireflies.clear()
+	_goal_sprays.clear()
 	_has_won = false
 	if _status_label != null:
 		_update_status_label()
@@ -224,22 +234,28 @@ func _add_environment() -> void:
 	var world := WorldEnvironment.new()
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("#020308")
+	environment.background_color = Color("#000000")
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("#405268")
-	environment.ambient_light_energy = 0.38
+	environment.ambient_light_color = Color("#030508")
+	environment.ambient_light_energy = 0.03
 	environment.fog_enabled = true
-	environment.fog_light_color = Color("#53657b")
+	environment.fog_light_color = Color("#182030")
 	environment.fog_density = 0.028
 	environment.fog_sky_affect = 0.82
+	environment.volumetric_fog_enabled = true
+	environment.volumetric_fog_density = 0.045
+	environment.volumetric_fog_albedo = Color("#111827")
+	environment.volumetric_fog_emission = Color("#03060a")
+	environment.volumetric_fog_length = 96.0
 	world.environment = environment
 	add_child(world)
 
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-48.0, -35.0, 0.0)
-	sun.light_energy = 1.15
-	sun.shadow_enabled = true
-	add_child(sun)
+	var hex_rim_light := DirectionalLight3D.new()
+	hex_rim_light.rotation_degrees = Vector3(-36.0, -72.0, 0.0)
+	hex_rim_light.light_color = Color("#9fb8d7")
+	hex_rim_light.light_energy = 0.18
+	hex_rim_light.shadow_enabled = false
+	add_child(hex_rim_light)
 
 
 func _add_start_pad() -> void:
@@ -247,32 +263,35 @@ func _add_start_pad() -> void:
 
 
 func _add_end_walls() -> void:
-	_add_end_wall(START_POINT.x - 15.0, Color("#171b22"), -1.0)
-	_add_end_wall(GOAL_POINT.x + 15.0, Color("#1b1720"), 1.0)
+	_add_end_wall(START_POINT.x - 28.0, Color("#ff3030"), -1.0)
+	_add_end_wall(GOAL_POINT.x + 32.0, Color("#2f7bff"), 1.0)
 
 
-func _add_end_wall(x: float, color: Color, facing: float) -> void:
+func _add_end_wall(x: float, ripple_color: Color, facing: float) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = _level_seed + int(absf(x) * 1000.0)
+	var cliff_material := _make_cliff_material(ripple_color)
 
-	for index in 9:
-		var z := lerpf(-22.0, 22.0, float(index) / 8.0)
-		var height := rng.randf_range(22.0, 34.0)
-		var width := rng.randf_range(3.6, 7.5)
-		var depth := rng.randf_range(5.0, 9.0)
-		var y := -11.0 + height * 0.5 + rng.randf_range(-1.5, 1.8)
+	for index in 17:
+		var z := lerpf(-82.0, 82.0, float(index) / 16.0)
+		var height := rng.randf_range(220.0, 340.0)
+		var width := rng.randf_range(8.0, 16.0)
+		var depth := rng.randf_range(11.0, 22.0)
+		var y := -110.0 + height * 0.5 + rng.randf_range(-8.0, 8.0)
 		var block := _add_box(
-			Vector3(x + rng.randf_range(-1.1, 1.1), y, z),
+			Vector3(x + rng.randf_range(-2.0, 2.0), y, z),
 			Vector3(width, height, depth),
-			color.lightened(rng.randf_range(0.0, 0.12))
+			Color.BLACK,
+			cliff_material
 		)
 		block.rotation_degrees.y = rng.randf_range(-4.0, 4.0)
 
-	for index in 5:
+	for index in 9:
 		var buttress := _add_box(
-			Vector3(x - facing * 3.0, rng.randf_range(2.0, 8.0), lerpf(-17.0, 17.0, float(index) / 4.0)),
-			Vector3(rng.randf_range(5.0, 8.0), rng.randf_range(18.0, 28.0), rng.randf_range(2.8, 4.6)),
-			color.lightened(0.08)
+			Vector3(x - facing * 8.0, rng.randf_range(28.0, 72.0), lerpf(-72.0, 72.0, float(index) / 8.0)),
+			Vector3(rng.randf_range(9.0, 18.0), rng.randf_range(160.0, 260.0), rng.randf_range(7.0, 14.0)),
+			Color.BLACK,
+			cliff_material
 		)
 		buttress.rotation_degrees.z = facing * rng.randf_range(1.0, 4.0)
 
@@ -282,6 +301,9 @@ func _add_hex_path() -> void:
 	rng.seed = _level_seed + 41017
 
 	for index in _bridge_points.size():
+		if index == 0:
+			continue
+
 		var point := _bridge_points[index]
 		var height_ratio := inverse_lerp(HEIGHT_MIN, HEIGHT_MAX, point.y)
 		var color := _platform_materials[index % _platform_materials.size()].albedo_color.lerp(Color("#e3dba4"), height_ratio * 0.35)
@@ -346,15 +368,36 @@ func _add_goal() -> void:
 	shape.shape = box
 	goal.add_child(shape)
 
-	var marker := MeshInstance3D.new()
-	var marker_mesh := CylinderMesh.new()
-	marker_mesh.top_radius = 1.15
-	marker_mesh.bottom_radius = 1.15
-	marker_mesh.height = 2.5
-	marker_mesh.radial_segments = 6
-	marker.mesh = marker_mesh
-	marker.material_override = _make_material(Color("#69e38f"))
-	goal.add_child(marker)
+	_add_goal_spray(goal)
+
+
+func _add_goal_spray(goal: Area3D) -> void:
+	var spray_root := Node3D.new()
+	goal.add_child(spray_root)
+	_goal_sprays.append(spray_root)
+
+	var material := _make_glow_material(Color("#69e38f"))
+	for index in 72:
+		var t := float(index) / 71.0
+		var angle := t * TAU * 5.25
+		var radius := lerpf(0.22, 2.2, t)
+		var height := lerpf(-0.4, 4.2, t)
+		var particle := MeshInstance3D.new()
+		var mesh := SphereMesh.new()
+		mesh.radius = lerpf(0.045, 0.13, t)
+		mesh.height = mesh.radius * 2.0
+		particle.mesh = mesh
+		particle.position = Vector3(cos(angle) * radius, height, sin(angle) * radius)
+		particle.material_override = material
+		spray_root.add_child(particle)
+
+	for index in 3:
+		var light := OmniLight3D.new()
+		light.light_color = Color("#69e38f")
+		light.light_energy = 0.75
+		light.omni_range = 5.5 + float(index) * 1.2
+		light.position.y = float(index) * 1.35
+		spray_root.add_child(light)
 
 
 func _add_hex_platform(center: Vector3, radius: float, color: Color, exploding := false) -> StaticBody3D:
@@ -370,12 +413,7 @@ func _add_hex_platform(center: Vector3, radius: float, color: Color, exploding :
 	body.add_child(shape)
 
 	var visual := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = radius * 0.86
-	mesh.bottom_radius = radius * 0.96
-	mesh.height = HEX_HEIGHT
-	mesh.radial_segments = 6
-	visual.mesh = mesh
+	visual.mesh = _make_flat_hex_mesh(radius * 0.86, radius * 0.96, HEX_HEIGHT)
 	visual.material_override = _make_material(color)
 	body.add_child(visual)
 
@@ -399,6 +437,24 @@ func _add_hex_platform(center: Vector3, radius: float, color: Color, exploding :
 func _add_void_fog() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
+
+	for index in 5:
+		var floor_fog := MeshInstance3D.new()
+		var floor_mesh := PlaneMesh.new()
+		floor_mesh.size = Vector2(135.0 + float(index) * 18.0, 190.0)
+		floor_fog.mesh = floor_mesh
+		floor_fog.position = Vector3(
+			(START_POINT.x + GOAL_POINT.x) * 0.5,
+			-18.0 - float(index) * 15.0,
+			0.0
+		)
+		floor_fog.rotation_degrees = Vector3(0.0, rng.randf_range(-4.0, 4.0), 0.0)
+		floor_fog.material_override = _make_transparent_material(
+			Color(0.08, 0.12, 0.18, 0.22 - float(index) * 0.02),
+			-20 - index
+		)
+		_world_root.add_child(floor_fog)
+		_fog_bands.append(floor_fog)
 
 	for index in FOG_BAND_COUNT:
 		var fog := MeshInstance3D.new()
@@ -482,8 +538,8 @@ func _add_fireflies() -> void:
 
 		var light := OmniLight3D.new()
 		light.light_color = Color("#d5ff85")
-		light.light_energy = 0.18
-		light.omni_range = 1.4
+		light.light_energy = 0.48
+		light.omni_range = 2.4
 		node.add_child(light)
 
 		_fireflies.append({
@@ -492,6 +548,80 @@ func _add_fireflies() -> void:
 			"phase": rng.randf_range(0.0, TAU),
 			"speed": rng.randf_range(1.2, 2.4),
 		})
+
+
+func _add_companion_glowbugs() -> void:
+	if not _companion_glowbugs.is_empty():
+		return
+
+	var colors := [
+		Color("#ff6b7a"),
+		Color("#62d9ff"),
+		Color("#f6d86b"),
+		Color("#c084ff"),
+	]
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+
+	for index in colors.size():
+		var root := Node3D.new()
+		add_child(root)
+
+		var glow := MeshInstance3D.new()
+		var mesh := SphereMesh.new()
+		mesh.radius = 0.09
+		mesh.height = 0.18
+		glow.mesh = mesh
+		glow.material_override = _make_glow_material(colors[index])
+		root.add_child(glow)
+
+		var light := OmniLight3D.new()
+		light.light_color = colors[index]
+		light.light_energy = 0.42
+		light.omni_range = 2.6
+		root.add_child(light)
+
+		_companion_glowbugs.append({
+			"node": root,
+			"axis": Vector3(
+				rng.randf_range(-1.0, 1.0),
+				rng.randf_range(0.35, 1.0),
+				rng.randf_range(-1.0, 1.0)
+			).normalized(),
+			"radius": rng.randf_range(1.15, 2.45),
+			"height_bias": rng.randf_range(0.6, 1.8),
+			"phase": rng.randf_range(0.0, TAU),
+			"speed": rng.randf_range(1.1, 2.4),
+			"wobble": rng.randf_range(0.25, 0.8),
+			"dance": 0.0,
+		})
+
+
+func _update_companion_glowbugs(delta: float, elapsed: float) -> void:
+	if _player == null:
+		return
+
+	for entry in _companion_glowbugs:
+		var bug := entry["node"] as Node3D
+		var dance := maxf(float(entry["dance"]) - delta * 1.6, 0.0)
+		entry["dance"] = dance
+
+		var axis := entry["axis"] as Vector3
+		var radius := float(entry["radius"])
+		var height_bias := float(entry["height_bias"])
+		var phase := float(entry["phase"])
+		var speed := float(entry["speed"]) * (1.0 + dance * 2.8)
+		var wobble := float(entry["wobble"]) + dance * 0.75
+		var angle := elapsed * speed + phase
+		var basis := Basis(axis, angle)
+		var orbit := basis * Vector3(radius, sin(angle * 1.7 + phase) * wobble, 0.0)
+		var target := _player.global_position + Vector3(0.0, height_bias, 0.0) + orbit
+		bug.global_position = bug.global_position.lerp(target, 1.0 - pow(0.018, delta))
+
+
+func _on_player_landed() -> void:
+	for entry in _companion_glowbugs:
+		entry["dance"] = 1.0
 
 
 func _spawn_player() -> void:
@@ -503,6 +633,9 @@ func _spawn_player() -> void:
 		_player.global_transform = _get_player_spawn_transform()
 	if _player.has_method("set_mechanics"):
 		_player.set_mechanics(_level_tuning.get("mechanics", {}))
+	if not _player.is_connected("landed", Callable(self, "_on_player_landed")):
+		_player.connect("landed", Callable(self, "_on_player_landed"))
+	_add_companion_glowbugs()
 
 
 func _get_player_spawn_transform() -> Transform3D:
@@ -558,6 +691,13 @@ func _make_transparent_material(color: Color, render_priority: int) -> ShaderMat
 	return material
 
 
+func _make_cliff_material(ripple_color: Color) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = CliffRippleShader
+	material.set_shader_parameter("ripple_color", ripple_color)
+	return material
+
+
 func _make_glow_material(color: Color) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.albedo_color = color
@@ -565,6 +705,68 @@ func _make_glow_material(color: Color) -> StandardMaterial3D:
 	material.emission = color
 	material.emission_energy_multiplier = 2.5
 	return material
+
+
+func _make_flat_hex_mesh(top_radius: float, bottom_radius: float, height: float) -> ArrayMesh:
+	var vertices := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var indices := PackedInt32Array()
+	var half_height := height * 0.5
+
+	var top_center := Vector3(0.0, half_height, 0.0)
+	var bottom_center := Vector3(0.0, -half_height, 0.0)
+	var top_points: Array[Vector3] = []
+	var bottom_points: Array[Vector3] = []
+
+	for index in 6:
+		var angle := TAU * float(index) / 6.0 + PI / 6.0
+		top_points.append(Vector3(cos(angle) * top_radius, half_height, sin(angle) * top_radius))
+		bottom_points.append(Vector3(cos(angle) * bottom_radius, -half_height, sin(angle) * bottom_radius))
+
+	for index in 6:
+		_add_flat_triangle(vertices, normals, indices, top_center, top_points[index], top_points[(index + 1) % 6], Vector3.UP)
+		_add_flat_triangle(vertices, normals, indices, bottom_center, bottom_points[(index + 1) % 6], bottom_points[index], Vector3.DOWN)
+
+	for index in 6:
+		var next := (index + 1) % 6
+		var a := bottom_points[index]
+		var b := bottom_points[next]
+		var c := top_points[next]
+		var d := top_points[index]
+		var normal := (b - a).cross(d - a).normalized()
+		_add_flat_triangle(vertices, normals, indices, a, b, c, normal)
+		_add_flat_triangle(vertices, normals, indices, a, c, d, normal)
+
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = indices
+
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+func _add_flat_triangle(
+	vertices: PackedVector3Array,
+	normals: PackedVector3Array,
+	indices: PackedInt32Array,
+	a: Vector3,
+	b: Vector3,
+	c: Vector3,
+	normal: Vector3
+) -> void:
+	var start := vertices.size()
+	vertices.append(a)
+	vertices.append(b)
+	vertices.append(c)
+	normals.append(normal)
+	normals.append(normal)
+	normals.append(normal)
+	indices.append(start)
+	indices.append(start + 1)
+	indices.append(start + 2)
 
 
 func _generate_bridge_points(seed: int) -> Array[Vector3]:
@@ -755,7 +957,7 @@ func _axial_to_world(q: int, r: int) -> Vector3:
 	)
 
 
-func _add_box(center: Vector3, size: Vector3, color: Color) -> StaticBody3D:
+func _add_box(center: Vector3, size: Vector3, color: Color, material_override: Material = null) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.position = center
 	_world_root.add_child(body)
@@ -770,7 +972,7 @@ func _add_box(center: Vector3, size: Vector3, color: Color) -> StaticBody3D:
 	var mesh := BoxMesh.new()
 	mesh.size = size
 	visual.mesh = mesh
-	visual.material_override = _make_material(color)
+	visual.material_override = material_override if material_override != null else _make_material(color)
 	body.add_child(visual)
 
 	return body
@@ -799,15 +1001,11 @@ func _update_debug_label() -> void:
 	var player_position := Vector3.ZERO
 	var player_velocity := Vector3.ZERO
 	var is_grounded := false
-	var player_state := {}
+	var player_state := _get_player_debug_state()
 	if _player != null:
 		player_position = _player.global_position
 		player_velocity = _player.velocity
 		is_grounded = _player.is_on_floor()
-		if _player.has_method("get_debug_state"):
-			player_state = _player.get_debug_state()
-	if _mechanic_hud != null:
-		_mechanic_hud.set_state(player_state)
 
 	_debug_label.text = (
 		"F3/Tab debug  G regenerate  N advance  M transition\n"
@@ -836,6 +1034,17 @@ func _update_debug_label() -> void:
 		float(player_state.get("bunny_multiplier", 1.0)),
 		_grapple_debug_text(player_state),
 	]
+
+
+func _update_mechanic_hud() -> void:
+	if _mechanic_hud != null:
+		_mechanic_hud.set_state(_get_player_debug_state())
+
+
+func _get_player_debug_state() -> Dictionary:
+	if _player != null and _player.has_method("get_debug_state"):
+		return _player.get_debug_state()
+	return {}
 
 
 func _double_debug_text(player_state: Dictionary) -> String:
