@@ -1,0 +1,13 @@
+.godot/
+.codex
+.import/
+*.import
+export.cfg
+export_presets.cfg
+
+# Godot mono builds, if the project switches to C# later.
+.mono/
+
+# Local editor and OS noise.
+.DS_Store
+Thumbs.db
