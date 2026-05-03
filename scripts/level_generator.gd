@@ -11,6 +11,11 @@ const MIN_VERTICAL_STEP := -1.65
 const HEIGHT_MIN := -4.5
 const HEIGHT_MAX := 8.5
 const TOTAL_LEVELS := 24
+const INTRO_NONE := ""
+const INTRO_DOUBLE_JUMP := "double_jump"
+const INTRO_BUNNY_HOP := "bunny_hop"
+const INTRO_GRAPPLE := "grapple"
+const INTRO_EXPLODING_HEXES := "exploding_hexes"
 
 
 func generate(level_index: int, seed: int) -> Dictionary:
@@ -54,6 +59,9 @@ func get_level_tuning(level_index: int) -> Dictionary:
 		"drop_max": 1.05,
 		"exploding_hexes": bool(mechanics.get("exploding_hexes", false)),
 		"exploding_chance": [0.12, 0.22, 0.34][phase],
+		"intro_pattern": INTRO_NONE,
+		"exploding_indices": [],
+		"grapple_anchor_gaps": [],
 	}
 
 	match mechanic_index:
@@ -102,6 +110,8 @@ func get_level_tuning(level_index: int) -> Dictionary:
 		tuning["branch_chance"] = minf(float(tuning["branch_chance"]) + 0.12, 0.58)
 		tuning["height_min"] = float(tuning["height_min"]) - 0.8
 		tuning["height_max"] = float(tuning["height_max"]) + 0.7
+	elif phase == 0:
+		_apply_intro_tuning(tuning, mechanic_index)
 
 	return tuning
 
@@ -115,6 +125,9 @@ func axial_to_world(q: int, r: int) -> Vector3:
 
 
 func _generate_bridge_points(seed: int, tuning: Dictionary) -> Array[Vector3]:
+	if str(tuning.get("intro_pattern", INTRO_NONE)) != INTRO_NONE:
+		return _generate_intro_bridge_points(tuning)
+
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
 
@@ -138,6 +151,114 @@ func _generate_bridge_points(seed: int, tuning: Dictionary) -> Array[Vector3]:
 	points[0] = START_POINT
 	points[points.size() - 1] = axial_to_world(PATH_STEPS, 0)
 	points[points.size() - 1].y = heights[heights.size() - 1]
+	return points
+
+
+func _apply_intro_tuning(tuning: Dictionary, mechanic_index: int) -> void:
+	tuning["lane_limit"] = 0
+	tuning["turn_chance"] = 0.0
+	tuning["branch_chance"] = 0.0
+	tuning["height_min"] = 0.0
+	tuning["height_max"] = 0.0
+	tuning["climb_min"] = 0.0
+	tuning["climb_max"] = 0.0
+	tuning["drop_min"] = 0.0
+	tuning["drop_max"] = 0.0
+	tuning["reversal_chance"] = 0.0
+
+	match mechanic_index:
+		0:
+			tuning["intro_pattern"] = INTRO_DOUBLE_JUMP
+		1:
+			tuning["intro_pattern"] = INTRO_BUNNY_HOP
+		2:
+			tuning["intro_pattern"] = INTRO_GRAPPLE
+			tuning["grapple_anchor_gaps"] = [11, 17, 23]
+		3:
+			tuning["intro_pattern"] = INTRO_EXPLODING_HEXES
+			tuning["exploding_chance"] = 0.0
+			tuning["exploding_indices"] = [6, 11, 16, 21, 25]
+
+
+func _generate_intro_bridge_points(tuning: Dictionary) -> Array[Vector3]:
+	var pattern := str(tuning["intro_pattern"])
+	var gaps: Array[float] = []
+
+	match pattern:
+		INTRO_DOUBLE_JUMP:
+			gaps = _intro_double_jump_gaps()
+		INTRO_BUNNY_HOP:
+			gaps = _intro_bunny_hop_gaps()
+		INTRO_GRAPPLE:
+			gaps = _intro_grapple_gaps()
+		INTRO_EXPLODING_HEXES:
+			gaps = _intro_exploding_hex_gaps()
+		_:
+			gaps = _intro_normal_gaps()
+
+	return _straight_points_from_gaps(gaps)
+
+
+func _intro_normal_gaps() -> Array[float]:
+	var gaps: Array[float] = []
+	for index in PATH_STEPS:
+		var t := float(index) / float(PATH_STEPS - 1)
+		gaps.append(lerpf(2.15, 4.28, pow(t, 1.45)))
+	return _scaled_gaps(gaps)
+
+
+func _intro_double_jump_gaps() -> Array[float]:
+	var gaps: Array[float] = []
+	for index in PATH_STEPS:
+		var t := float(index) / float(PATH_STEPS - 1)
+		gaps.append(lerpf(1.72, 5.72, pow(t, 1.85)))
+	return _scaled_gaps(gaps)
+
+
+func _intro_bunny_hop_gaps() -> Array[float]:
+	var gaps: Array[float] = []
+	for index in PATH_STEPS:
+		var t := float(index) / float(PATH_STEPS - 1)
+		gaps.append(lerpf(1.58, 6.35, pow(t, 2.05)))
+	return _scaled_gaps(gaps)
+
+
+func _intro_grapple_gaps() -> Array[float]:
+	var gaps := _intro_normal_gaps()
+	for gap_index in [11, 17, 23]:
+		gaps[gap_index] = 8.6
+	return _scaled_gaps(gaps)
+
+
+func _intro_exploding_hex_gaps() -> Array[float]:
+	var gaps: Array[float] = []
+	for index in PATH_STEPS:
+		var t := float(index) / float(PATH_STEPS - 1)
+		gaps.append(lerpf(2.1, 3.85, pow(t, 1.35)))
+	return _scaled_gaps(gaps)
+
+
+func _scaled_gaps(gaps: Array[float]) -> Array[float]:
+	var total := GOAL_POINT.x - START_POINT.x
+	var current_total := 0.0
+	for gap in gaps:
+		current_total += gap
+
+	var scale := total / current_total
+	var scaled: Array[float] = []
+	for gap in gaps:
+		scaled.append(gap * scale)
+	return scaled
+
+
+func _straight_points_from_gaps(gaps: Array[float]) -> Array[Vector3]:
+	var points: Array[Vector3] = [START_POINT]
+	var x := START_POINT.x
+	for gap in gaps:
+		x += gap
+		points.append(Vector3(x, 0.0, 0.0))
+
+	points[points.size() - 1] = GOAL_POINT
 	return points
 
 
