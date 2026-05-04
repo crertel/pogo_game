@@ -22,6 +22,9 @@ const FIREFLY_COUNT := 46
 const VOID_LIGHT_COUNT := 10
 const FOG_BAND_COUNT := 10
 const GRAPPLE_ROCK_STEP := 4
+const HEX_ROCK_ATLAS_PATH := "res://assets/textures/hex_rock_atlas_512.png"
+const HEX_ATLAS_COLUMNS := 4
+const HEX_ATLAS_ROWS := 4
 const COMPANIONS_ENABLED := false
 
 var player: CharacterBody3D
@@ -30,7 +33,9 @@ var bridge_points: Array[Vector3] = []
 var level_tuning := {}
 var level_seed := 0
 
-var _platform_materials: Array[StandardMaterial3D] = []
+var _platform_colors: Array[Color] = []
+var _hex_material_cache: Dictionary = {}
+var _hex_rock_atlas: Texture2D
 var _fog_bands: Array[Node3D] = []
 var _void_lights: Array[Dictionary] = []
 var _fireflies: Array[Dictionary] = []
@@ -175,11 +180,13 @@ func get_background_debug_text() -> String:
 
 
 func _build_materials() -> void:
-	_platform_materials = [
-		_make_material(Color("#caa15a")),
-		_make_material(Color("#d6b463")),
-		_make_material(Color("#9fbf78")),
+	_platform_colors = [
+		Color("#caa15a"),
+		Color("#d6b463"),
+		Color("#9fbf78"),
 	]
+	_hex_material_cache.clear()
+	_load_hex_rock_atlas()
 
 
 func _add_start_pad() -> void:
@@ -230,7 +237,7 @@ func _add_hex_path() -> void:
 
 		var point := bridge_points[index]
 		var height_ratio := inverse_lerp(HEIGHT_MIN, HEIGHT_MAX, point.y)
-		var color := _platform_materials[index % _platform_materials.size()].albedo_color.lerp(Color("#e3dba4"), height_ratio * 0.35)
+		var color := _platform_colors[index % _platform_colors.size()].lerp(Color("#e3dba4"), height_ratio * 0.35)
 		var exploding := _is_exploding_hex(index, rng)
 		if exploding:
 			color = Color("#c65c4d")
@@ -423,9 +430,10 @@ func _add_hex_platform(center: Vector3, radius: float, color: Color, exploding :
 	shape.shape = cylinder
 	body.add_child(shape)
 
+	var tile_index := _hex_atlas_tile_for(center, color, exploding)
 	var visual := MeshInstance3D.new()
-	visual.mesh = _make_flat_hex_mesh(radius * 0.86, radius * 0.96, HEX_HEIGHT)
-	visual.material_override = _make_material(color)
+	visual.mesh = _make_flat_hex_mesh(radius * 0.86, radius * 0.96, HEX_HEIGHT, tile_index)
+	visual.material_override = _make_hex_material(color)
 	body.add_child(visual)
 
 	if exploding:
@@ -656,6 +664,40 @@ func _make_material(color: Color) -> StandardMaterial3D:
 	return material
 
 
+func _make_hex_material(color: Color) -> StandardMaterial3D:
+	var key := color.to_html(false)
+	if _hex_material_cache.has(key):
+		return _hex_material_cache[key]
+
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 0.88
+	if _hex_rock_atlas != null:
+		material.albedo_texture = _hex_rock_atlas
+	_hex_material_cache[key] = material
+	return material
+
+
+func _load_hex_rock_atlas() -> void:
+	if _hex_rock_atlas != null:
+		return
+	var image := Image.load_from_file(HEX_ROCK_ATLAS_PATH)
+	if image == null or image.is_empty():
+		return
+	_hex_rock_atlas = ImageTexture.create_from_image(image)
+
+
+func _hex_atlas_tile_for(center: Vector3, color: Color, exploding: bool) -> int:
+	if exploding:
+		return 6
+	if color.g > color.r and color.g > color.b:
+		return 3
+
+	var candidates := [0, 1, 2, 4, 5, 8, 9, 11, 12, 13, 15]
+	var hash_value := int(absf(center.x * 37.0 + center.z * 53.0 + center.y * 29.0 + float(level_seed % 997)))
+	return candidates[hash_value % candidates.size()]
+
+
 func _make_transparent_material(color: Color, render_priority: int) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = VoidFogShader
@@ -692,11 +734,13 @@ func _make_rock_material() -> StandardMaterial3D:
 	return material
 
 
-func _make_flat_hex_mesh(top_radius: float, bottom_radius: float, height: float) -> ArrayMesh:
+func _make_flat_hex_mesh(top_radius: float, bottom_radius: float, height: float, atlas_tile_index: int) -> ArrayMesh:
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
+	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
 	var half_height := height * 0.5
+	var uv_radius := maxf(top_radius, bottom_radius)
 
 	var top_center := Vector3(0.0, half_height, 0.0)
 	var bottom_center := Vector3(0.0, -half_height, 0.0)
@@ -709,8 +753,8 @@ func _make_flat_hex_mesh(top_radius: float, bottom_radius: float, height: float)
 		bottom_points.append(Vector3(cos(angle) * bottom_radius, -half_height, sin(angle) * bottom_radius))
 
 	for index in 6:
-		_add_flat_triangle(vertices, normals, indices, top_center, top_points[index], top_points[(index + 1) % 6], Vector3.UP)
-		_add_flat_triangle(vertices, normals, indices, bottom_center, bottom_points[(index + 1) % 6], bottom_points[index], Vector3.DOWN)
+		_add_flat_triangle(vertices, normals, uvs, indices, top_center, top_points[index], top_points[(index + 1) % 6], Vector3.UP, uv_radius, atlas_tile_index)
+		_add_flat_triangle(vertices, normals, uvs, indices, bottom_center, bottom_points[(index + 1) % 6], bottom_points[index], Vector3.DOWN, uv_radius, atlas_tile_index)
 
 	for index in 6:
 		var next := (index + 1) % 6
@@ -719,13 +763,14 @@ func _make_flat_hex_mesh(top_radius: float, bottom_radius: float, height: float)
 		var c := top_points[next]
 		var d := top_points[index]
 		var normal := (b - a).cross(d - a).normalized()
-		_add_flat_triangle(vertices, normals, indices, a, b, c, normal)
-		_add_flat_triangle(vertices, normals, indices, a, c, d, normal)
+		_add_flat_triangle(vertices, normals, uvs, indices, a, b, c, normal, uv_radius, atlas_tile_index)
+		_add_flat_triangle(vertices, normals, uvs, indices, a, c, d, normal, uv_radius, atlas_tile_index)
 
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 
 	var mesh := ArrayMesh.new()
@@ -736,11 +781,14 @@ func _make_flat_hex_mesh(top_radius: float, bottom_radius: float, height: float)
 func _add_flat_triangle(
 	vertices: PackedVector3Array,
 	normals: PackedVector3Array,
+	uvs: PackedVector2Array,
 	indices: PackedInt32Array,
 	a: Vector3,
 	b: Vector3,
 	c: Vector3,
-	normal: Vector3
+	normal: Vector3,
+	uv_radius: float,
+	atlas_tile_index: int
 ) -> void:
 	var start := vertices.size()
 	vertices.append(a)
@@ -749,9 +797,23 @@ func _add_flat_triangle(
 	normals.append(normal)
 	normals.append(normal)
 	normals.append(normal)
+	uvs.append(_hex_uv(a, uv_radius, atlas_tile_index))
+	uvs.append(_hex_uv(b, uv_radius, atlas_tile_index))
+	uvs.append(_hex_uv(c, uv_radius, atlas_tile_index))
 	indices.append(start)
 	indices.append(start + 1)
 	indices.append(start + 2)
+
+
+func _hex_uv(point: Vector3, radius: float, atlas_tile_index: int) -> Vector2:
+	var diameter := maxf(radius * 2.0, 0.001)
+	var base_uv := Vector2(point.x / diameter + 0.5, point.z / diameter + 0.5)
+	var cell_size := Vector2(1.0 / float(HEX_ATLAS_COLUMNS), 1.0 / float(HEX_ATLAS_ROWS))
+	var tile := Vector2(
+		float(atlas_tile_index % HEX_ATLAS_COLUMNS),
+		float(floori(float(atlas_tile_index) / float(HEX_ATLAS_COLUMNS)))
+	)
+	return base_uv * cell_size + tile * cell_size
 
 
 func _add_box(center: Vector3, size: Vector3, color: Color, material_override: Material = null) -> StaticBody3D:
