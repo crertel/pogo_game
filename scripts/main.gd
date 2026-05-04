@@ -6,18 +6,33 @@ const TransitionOverlayScript := preload("res://scripts/transition_overlay.gd")
 const LevelGenerator := preload("res://scripts/level_generator.gd")
 const RunController := preload("res://scripts/run_controller.gd")
 const WorldBuilder := preload("res://scripts/world_builder.gd")
+const MantaFlockEvent := preload("res://scripts/background_events/manta_flock.gd")
 
 const START_POINT := Vector3(-7.0, 0.0, 0.0)
 const FALL_LIMIT := -18.0
+const DEFAULT_MOUSE_SENSITIVITY := 0.0025
 
 var _player: CharacterBody3D
 var _status_label: Label
 var _debug_label: Label
 var _mechanic_hud: Control
 var _transition_overlay: Control
+var _menu_canvas: CanvasLayer
+var _menu_root: Control
+var _main_menu_panel: Control
+var _settings_panel: Control
+var _gameplay_canvas: CanvasLayer
+var _volume_label: Label
+var _sensitivity_label: Label
+var _fullscreen_check: CheckButton
+var _menu_background: Node3D
+var _menu_mantas: Node3D
 var _debug_visible := false
 var _transitioning := false
 var _has_won := false
+var _game_started := false
+var _menu_open := true
+var _settings_open := false
 var _bridge_points: Array[Vector3] = []
 var _world_builder: Node3D
 var _level_seed := 0
@@ -27,18 +42,25 @@ var _run_controller := RunController.new()
 var _max_step_distance := 0.0
 var _max_step_height := 0.0
 var _min_step_drop := 0.0
+var _mouse_sensitivity := DEFAULT_MOUSE_SENSITIVITY
 
 
 func _ready() -> void:
-	_run_controller.start()
-	_build_world()
-	_spawn_player()
 	_build_ui()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_build_menu_background()
+	_show_main_menu()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _transitioning:
+		return
+
+	if event.is_action_pressed("ui_cancel"):
+		_handle_escape()
+		get_viewport().set_input_as_handled()
+		return
+
+	if _menu_open:
 		return
 
 	if event.is_action_pressed("restart"):
@@ -51,20 +73,22 @@ func _unhandled_input(event: InputEvent) -> void:
 		_debug_force_phase_end()
 	elif event.is_action_pressed("toggle_debug"):
 		_toggle_debug()
-	elif event.is_action_pressed("ui_cancel"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventMouseButton and event.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _physics_process(_delta: float) -> void:
+	if _menu_open:
+		return
 	if _player != null and _player.global_position.y < FALL_LIMIT and not _has_won and not _run_controller.run_complete and not _transitioning:
 		_respawn_after_fall()
 
 
 func _process(delta: float) -> void:
 	var elapsed := Time.get_ticks_msec() / 1000.0
-	if _world_builder != null:
+	if _menu_open and _menu_mantas != null and _menu_mantas.has_method("process_effect"):
+		_menu_mantas.process_effect(delta, elapsed, null)
+	elif _world_builder != null:
 		_world_builder.process_effects(delta, elapsed)
 
 	_update_mechanic_hud()
@@ -72,6 +96,9 @@ func _process(delta: float) -> void:
 
 
 func _build_world() -> void:
+	if _world_builder != null:
+		_world_builder.queue_free()
+
 	_world_builder = WorldBuilder.new()
 	add_child(_world_builder)
 	_world_builder.setup_environment()
@@ -166,6 +193,9 @@ func _transition_to_next_level() -> void:
 
 
 func _spawn_player() -> void:
+	if _player != null:
+		_player.queue_free()
+
 	_player = PlayerScene.instantiate()
 	add_child(_player)
 	if _player.has_method("set_spawn_transform"):
@@ -174,6 +204,8 @@ func _spawn_player() -> void:
 		_player.global_transform = _get_player_spawn_transform()
 	if _player.has_method("set_mechanics"):
 		_player.set_mechanics(_level_tuning.get("mechanics", {}))
+	if _player.has_method("set_mouse_sensitivity"):
+		_player.set_mouse_sensitivity(_mouse_sensitivity)
 	if _world_builder != null:
 		_world_builder.set_player(_player)
 
@@ -186,32 +218,262 @@ func _get_player_spawn_transform() -> Transform3D:
 
 
 func _build_ui() -> void:
-	var canvas := CanvasLayer.new()
-	add_child(canvas)
+	_gameplay_canvas = CanvasLayer.new()
+	_gameplay_canvas.visible = false
+	add_child(_gameplay_canvas)
 
 	_status_label = Label.new()
 	_status_label.position = Vector2(24.0, 20.0)
 	_status_label.text = ""
 	_status_label.add_theme_font_size_override("font_size", 22)
-	canvas.add_child(_status_label)
+	_gameplay_canvas.add_child(_status_label)
 	_update_status_label()
 
 	_debug_label = Label.new()
 	_debug_label.position = Vector2(24.0, 54.0)
 	_debug_label.add_theme_font_size_override("font_size", 16)
 	_debug_label.visible = _debug_visible
-	canvas.add_child(_debug_label)
+	_gameplay_canvas.add_child(_debug_label)
 
 	_mechanic_hud = Control.new()
 	_mechanic_hud.set_script(MechanicHudScript)
 	_mechanic_hud.set_anchors_preset(Control.PRESET_CENTER)
 	_mechanic_hud.position = Vector2(-42.0, -42.0)
-	canvas.add_child(_mechanic_hud)
+	_gameplay_canvas.add_child(_mechanic_hud)
 
 	_transition_overlay = Control.new()
 	_transition_overlay.set_script(TransitionOverlayScript)
 	_transition_overlay.z_index = 100
-	canvas.add_child(_transition_overlay)
+	_gameplay_canvas.add_child(_transition_overlay)
+
+	_build_menu_ui()
+
+
+func _build_menu_background() -> void:
+	_menu_background = Node3D.new()
+	_menu_background.name = "MenuBackground"
+	add_child(_menu_background)
+
+	var world := WorldEnvironment.new()
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color("#000000")
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color("#07111f")
+	environment.ambient_light_energy = 0.32
+	environment.fog_enabled = true
+	environment.fog_light_color = Color("#102033")
+	environment.fog_density = 0.012
+	world.environment = environment
+	_menu_background.add_child(world)
+
+	var light := DirectionalLight3D.new()
+	light.rotation_degrees = Vector3(-18.0, 35.0, 0.0)
+	light.light_color = Color("#9fb8d7")
+	light.light_energy = 0.55
+	_menu_background.add_child(light)
+
+	var camera := Camera3D.new()
+	camera.transform = Transform3D(Basis(), Vector3(38.0, 22.0, 18.0)).looking_at(Vector3(38.0, 21.0, -118.0), Vector3.UP)
+	camera.fov = 68.0
+	camera.far = 420.0
+	camera.current = true
+	_menu_background.add_child(camera)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 173
+	_menu_mantas = MantaFlockEvent.new()
+	_menu_background.add_child(_menu_mantas)
+	_menu_mantas.setup({
+		"start_point": Vector3(-7.0, 0.0, 0.0),
+		"goal_point": Vector3(84.0, 0.0, 0.0),
+		"bridge_points": [],
+		"direction": 1.0,
+	}, rng)
+
+
+func _build_menu_ui() -> void:
+	_menu_canvas = CanvasLayer.new()
+	_menu_canvas.layer = 50
+	add_child(_menu_canvas)
+
+	_menu_root = Control.new()
+	_menu_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_menu_canvas.add_child(_menu_root)
+
+	var shade := ColorRect.new()
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shade.color = Color(0.0, 0.0, 0.0, 0.42)
+	_menu_root.add_child(shade)
+
+	_main_menu_panel = _make_menu_panel()
+	_menu_root.add_child(_main_menu_panel)
+
+	var title := Label.new()
+	title.text = "Pogo Chasm"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 54)
+	_main_menu_panel.add_child(title)
+
+	var new_game := _make_menu_button("New Game")
+	new_game.pressed.connect(_start_new_game)
+	_main_menu_panel.add_child(new_game)
+
+	var settings := _make_menu_button("Settings")
+	settings.pressed.connect(_show_settings_menu)
+	_main_menu_panel.add_child(settings)
+
+	var quit := _make_menu_button("Quit")
+	quit.pressed.connect(_quit_game)
+	_main_menu_panel.add_child(quit)
+
+	_settings_panel = _make_menu_panel()
+	_settings_panel.visible = false
+	_menu_root.add_child(_settings_panel)
+
+	var settings_title := Label.new()
+	settings_title.text = "Settings"
+	settings_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_title.add_theme_font_size_override("font_size", 42)
+	_settings_panel.add_child(settings_title)
+
+	_fullscreen_check = CheckButton.new()
+	_fullscreen_check.text = "Fullscreen"
+	_fullscreen_check.button_pressed = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+	_fullscreen_check.toggled.connect(_set_fullscreen)
+	_settings_panel.add_child(_fullscreen_check)
+
+	_volume_label = Label.new()
+	_volume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_settings_panel.add_child(_volume_label)
+
+	var volume := HSlider.new()
+	volume.min_value = 0.0
+	volume.max_value = 100.0
+	volume.step = 1.0
+	volume.value = 100.0
+	volume.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	volume.value_changed.connect(_set_master_volume)
+	_settings_panel.add_child(volume)
+	_set_master_volume(volume.value)
+
+	_sensitivity_label = Label.new()
+	_sensitivity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_settings_panel.add_child(_sensitivity_label)
+
+	var sensitivity := HSlider.new()
+	sensitivity.min_value = 0.8
+	sensitivity.max_value = 6.0
+	sensitivity.step = 0.1
+	sensitivity.value = _mouse_sensitivity * 1000.0
+	sensitivity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sensitivity.value_changed.connect(_set_mouse_sensitivity)
+	_settings_panel.add_child(sensitivity)
+	_set_mouse_sensitivity(sensitivity.value)
+
+	var back := _make_menu_button("Back")
+	back.pressed.connect(_show_main_menu)
+	_settings_panel.add_child(back)
+
+
+func _make_menu_panel() -> VBoxContainer:
+	var panel := VBoxContainer.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.custom_minimum_size = Vector2(360.0, 0.0)
+	panel.position = Vector2(-180.0, -190.0)
+	panel.add_theme_constant_override("separation", 16)
+	return panel
+
+
+func _make_menu_button(text: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = Vector2(320.0, 46.0)
+	button.focus_mode = Control.FOCUS_ALL
+	button.add_theme_font_size_override("font_size", 24)
+	return button
+
+
+func _show_main_menu() -> void:
+	_menu_open = true
+	_settings_open = false
+	if _menu_canvas != null:
+		_menu_canvas.visible = true
+	if _main_menu_panel != null:
+		_main_menu_panel.visible = true
+	if _settings_panel != null:
+		_settings_panel.visible = false
+	if _gameplay_canvas != null:
+		_gameplay_canvas.visible = false
+	if _player != null:
+		_player.process_mode = Node.PROCESS_MODE_DISABLED
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _show_settings_menu() -> void:
+	_settings_open = true
+	_main_menu_panel.visible = false
+	_settings_panel.visible = true
+
+
+func _hide_menu() -> void:
+	_menu_open = false
+	_settings_open = false
+	if _menu_canvas != null:
+		_menu_canvas.visible = false
+	if _gameplay_canvas != null:
+		_gameplay_canvas.visible = true
+	if _player != null:
+		_player.process_mode = Node.PROCESS_MODE_INHERIT
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _start_new_game() -> void:
+	if _menu_background != null:
+		_menu_background.queue_free()
+		_menu_background = null
+		_menu_mantas = null
+
+	_run_controller.start()
+	_game_started = true
+	_build_world()
+	_spawn_player()
+	_hide_menu()
+	_update_status_label()
+
+
+func _handle_escape() -> void:
+	if _settings_open:
+		_show_main_menu()
+	elif _menu_open:
+		if _game_started:
+			_hide_menu()
+	else:
+		_show_main_menu()
+
+
+func _set_fullscreen(enabled: bool) -> void:
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if enabled else DisplayServer.WINDOW_MODE_WINDOWED)
+
+
+func _set_master_volume(value: float) -> void:
+	var normalized := clampf(value / 100.0, 0.0, 1.0)
+	var bus := AudioServer.get_bus_index("Master")
+	AudioServer.set_bus_volume_db(bus, -80.0 if normalized <= 0.001 else linear_to_db(normalized))
+	if _volume_label != null:
+		_volume_label.text = "Master Volume: %d%%" % int(round(value))
+
+
+func _set_mouse_sensitivity(value: float) -> void:
+	_mouse_sensitivity = clampf(value / 1000.0, 0.0008, 0.006)
+	if _player != null and _player.has_method("set_mouse_sensitivity"):
+		_player.set_mouse_sensitivity(_mouse_sensitivity)
+	if _sensitivity_label != null:
+		_sensitivity_label.text = "Mouse Sensitivity: %.1f" % value
+
+
+func _quit_game() -> void:
+	get_tree().quit()
 
 
 func _update_debug_label() -> void:

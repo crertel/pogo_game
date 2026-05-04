@@ -29,9 +29,11 @@ var _speed := 12.0
 func setup(config: Dictionary, rng: RandomNumberGenerator) -> void:
 	start_point = config["start_point"] as Vector3
 	goal_point = config["goal_point"] as Vector3
-	bridge_points = config["bridge_points"]
+	bridge_points.clear()
+	for point in config["bridge_points"]:
+		bridge_points.append(point as Vector3)
 
-	_direction = -1.0 if rng.randf() < 0.5 else 1.0
+	_direction = float(config.get("direction", -1.0 if rng.randf() < 0.5 else 1.0))
 	_speed = rng.randf_range(6.8, 9.2)
 	var center_x := (start_point.x + goal_point.x) * 0.5
 	_target = Vector3(center_x, rng.randf_range(12.0, 30.0), -_direction * DEPTH_MIN)

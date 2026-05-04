@@ -25,6 +25,7 @@ const GRAPPLE_MISS_FLASH_TIME := 0.16
 @onready var _head: Node3D = $Head
 @onready var _camera: Camera3D = $Head/Camera3D
 
+var mouse_sensitivity := MOUSE_SENSITIVITY
 var _spawn_transform := Transform3D.IDENTITY
 var _coyote_left := 0.0
 var _jump_buffer_left := 0.0
@@ -70,9 +71,13 @@ func set_spawn_transform(spawn_transform: Transform3D) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
-		_pitch = clampf(_pitch - event.relative.y * MOUSE_SENSITIVITY, deg_to_rad(-82.0), deg_to_rad(82.0))
+		rotate_y(-event.relative.x * mouse_sensitivity)
+		_pitch = clampf(_pitch - event.relative.y * mouse_sensitivity, deg_to_rad(-82.0), deg_to_rad(82.0))
 		_head.rotation.x = _pitch
+
+
+func set_mouse_sensitivity(value: float) -> void:
+	mouse_sensitivity = clampf(value, 0.0008, 0.006)
 
 
 func _physics_process(delta: float) -> void:
