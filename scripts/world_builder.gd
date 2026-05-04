@@ -23,6 +23,7 @@ const VOID_LIGHT_COUNT := 10
 const FOG_BAND_COUNT := 10
 const GRAPPLE_ROCK_STEP := 4
 const HEX_ROCK_ATLAS_PATH := "res://assets/textures/hex_rock_atlas_512.png"
+const CLIFF_BASE_TEXTURE_PATH := "res://assets/textures/cliff_base.png"
 const HEX_ATLAS_COLUMNS := 4
 const HEX_ATLAS_ROWS := 4
 const COMPANIONS_ENABLED := false
@@ -36,6 +37,7 @@ var level_seed := 0
 var _platform_colors: Array[Color] = []
 var _hex_material_cache: Dictionary = {}
 var _hex_rock_atlas: Texture2D
+var _cliff_base_texture: Texture2D
 var _fog_bands: Array[Node3D] = []
 var _void_lights: Array[Dictionary] = []
 var _fireflies: Array[Dictionary] = []
@@ -187,6 +189,7 @@ func _build_materials() -> void:
 	]
 	_hex_material_cache.clear()
 	_load_hex_rock_atlas()
+	_load_cliff_base_texture()
 
 
 func _add_start_pad() -> void:
@@ -687,6 +690,15 @@ func _load_hex_rock_atlas() -> void:
 	_hex_rock_atlas = ImageTexture.create_from_image(image)
 
 
+func _load_cliff_base_texture() -> void:
+	if _cliff_base_texture != null:
+		return
+	var image := Image.load_from_file(CLIFF_BASE_TEXTURE_PATH)
+	if image == null or image.is_empty():
+		return
+	_cliff_base_texture = ImageTexture.create_from_image(image)
+
+
 func _hex_atlas_tile_for(center: Vector3, color: Color, exploding: bool) -> int:
 	if exploding:
 		return 6
@@ -711,6 +723,8 @@ func _make_transparent_material(color: Color, render_priority: int) -> ShaderMat
 func _make_cliff_material(ripple_color: Color) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = CliffRippleShader
+	if _cliff_base_texture != null:
+		material.set_shader_parameter("base_texture", _cliff_base_texture)
 	material.set_shader_parameter("ripple_color", ripple_color)
 	return material
 

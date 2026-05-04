@@ -15,6 +15,8 @@ const WALL_LIMIT := 74.0
 const WALL_REPEL_RADIUS := 24.0
 const HEX_REPEL_RADIUS := 28.0
 const REPULSION_BANK := 0.72
+const MANTA_PELT_PATH := "res://assets/textures/manta_pelt_256.png"
+const MANTA_VENTRAL_PATH := "res://assets/textures/manta_ventral_256.png"
 
 var start_point := Vector3.ZERO
 var goal_point := Vector3.ZERO
@@ -24,9 +26,12 @@ var _boids: Array[Dictionary] = []
 var _target := Vector3.ZERO
 var _direction := 1.0
 var _speed := 12.0
+var _manta_pelt: Texture2D
+var _manta_ventral: Texture2D
 
 
 func setup(config: Dictionary, rng: RandomNumberGenerator) -> void:
+	_load_manta_textures()
 	start_point = config["start_point"] as Vector3
 	goal_point = config["goal_point"] as Vector3
 	bridge_points.clear()
@@ -248,7 +253,7 @@ func _make_manta_ray() -> Node3D:
 	spine.mesh = spine_mesh
 	spine.position = Vector3(0.0, 0.0, 0.22)
 	spine.rotation_degrees.x = 90.0
-	spine.material_override = _make_manta_back_material()
+	spine.material_override = _make_manta_belly_material()
 	root.add_child(spine)
 
 	var head := MeshInstance3D.new()
@@ -309,11 +314,18 @@ func _make_manta_wing_mesh(side: float) -> ArrayMesh:
 		Vector3(0.0, 0.0, -0.62),
 	])
 	var normals := PackedVector3Array([Vector3.UP, Vector3.UP, Vector3.UP, Vector3.UP])
+	var uvs := PackedVector2Array([
+		Vector2(0.50, 0.08),
+		Vector2(1.00 if side > 0.0 else 0.00, 0.26),
+		Vector2(0.88 if side > 0.0 else 0.12, 0.88),
+		Vector2(0.50, 0.82),
+	])
 	var indices := PackedInt32Array([0, 1, 2, 0, 2, 3] if side > 0.0 else [0, 2, 1, 0, 3, 2])
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -328,11 +340,18 @@ func _make_manta_belly_wing_mesh(side: float) -> ArrayMesh:
 		Vector3(side * 0.18, -0.035, -0.34),
 	])
 	var normals := PackedVector3Array([Vector3.DOWN, Vector3.DOWN, Vector3.DOWN, Vector3.DOWN])
+	var uvs := PackedVector2Array([
+		Vector2(0.50, 0.56),
+		Vector2(0.84 if side > 0.0 else 0.16, 0.62),
+		Vector2(0.72 if side > 0.0 else 0.28, 0.92),
+		Vector2(0.50, 0.86),
+	])
 	var indices := PackedInt32Array([0, 2, 1, 0, 3, 2] if side > 0.0 else [0, 1, 2, 0, 2, 3])
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -341,18 +360,43 @@ func _make_manta_belly_wing_mesh(side: float) -> ArrayMesh:
 
 func _make_manta_back_material() -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color("#07162a")
+	if _manta_pelt != null:
+		material.albedo_color = Color.WHITE
+		material.albedo_texture = _manta_pelt
+		material.emission_texture = _manta_pelt
+	else:
+		material.albedo_color = Color("#07162a")
 	material.roughness = 0.85
 	material.emission_enabled = true
 	material.emission = Color("#0a274f")
-	material.emission_energy_multiplier = 0.32
+	material.emission_energy_multiplier = 0.42
 	return material
+
+
+func _load_manta_textures() -> void:
+	if _manta_pelt != null and _manta_ventral != null:
+		return
+	_manta_pelt = _load_texture_from_file(MANTA_PELT_PATH)
+	_manta_ventral = _load_texture_from_file(MANTA_VENTRAL_PATH)
+
+
+func _load_texture_from_file(path: String) -> Texture2D:
+	var image := Image.load_from_file(path)
+	if image == null or image.is_empty():
+		return null
+	return ImageTexture.create_from_image(image)
 
 
 func _make_manta_belly_material() -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color("#58ff7a")
+	if _manta_ventral != null:
+		material.albedo_color = Color.WHITE
+		material.albedo_texture = _manta_ventral
+		material.emission_texture = _manta_ventral
+	else:
+		material.albedo_color = Color("#58ff7a")
 	material.emission_enabled = true
-	material.emission = Color("#58ff7a")
-	material.emission_energy_multiplier = 3.2
+	material.emission = Color("#37bfa6")
+	material.emission_energy_multiplier = 0.85
+	material.roughness = 0.68
 	return material
