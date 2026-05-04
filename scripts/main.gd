@@ -25,6 +25,10 @@ var _gameplay_canvas: CanvasLayer
 var _volume_label: Label
 var _sensitivity_label: Label
 var _fullscreen_check: CheckButton
+var _display_option: OptionButton
+var _display_options: Array[int] = []
+var _resolution_option: OptionButton
+var _resolution_options: Array[Vector2i] = []
 var _menu_background: Node3D
 var _menu_mantas: Node3D
 var _debug_visible := false
@@ -343,6 +347,28 @@ func _build_menu_ui() -> void:
 	_fullscreen_check.toggled.connect(_set_fullscreen)
 	_settings_panel.add_child(_fullscreen_check)
 
+	var display_label := Label.new()
+	display_label.text = "Display"
+	display_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_settings_panel.add_child(display_label)
+
+	_display_option = OptionButton.new()
+	_display_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_populate_display_options()
+	_display_option.item_selected.connect(_set_display)
+	_settings_panel.add_child(_display_option)
+
+	var resolution_label := Label.new()
+	resolution_label.text = "Resolution"
+	resolution_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_settings_panel.add_child(resolution_label)
+
+	_resolution_option = OptionButton.new()
+	_resolution_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_populate_resolution_options()
+	_resolution_option.item_selected.connect(_set_resolution)
+	_settings_panel.add_child(_resolution_option)
+
 	_volume_label = Label.new()
 	_volume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_settings_panel.add_child(_volume_label)
@@ -454,6 +480,84 @@ func _handle_escape() -> void:
 
 func _set_fullscreen(enabled: bool) -> void:
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if enabled else DisplayServer.WINDOW_MODE_WINDOWED)
+
+
+func _populate_display_options() -> void:
+	_display_options.clear()
+	_display_option.clear()
+
+	var current_screen := DisplayServer.window_get_current_screen()
+	var selected_index := 0
+	for screen_index in DisplayServer.get_screen_count():
+		_display_options.append(screen_index)
+		var size := DisplayServer.screen_get_size(screen_index)
+		_display_option.add_item("Display %d (%d x %d)" % [screen_index + 1, size.x, size.y])
+		if screen_index == current_screen:
+			selected_index = _display_options.size() - 1
+
+	if _display_options.is_empty():
+		_display_options.append(0)
+		_display_option.add_item("Display 1")
+
+	_display_option.select(selected_index)
+
+
+func _set_display(index: int) -> void:
+	if index < 0 or index >= _display_options.size():
+		return
+
+	var screen := _display_options[index]
+	DisplayServer.window_set_current_screen(screen)
+	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_WINDOWED:
+		var screen_position := DisplayServer.screen_get_position(screen)
+		var screen_size := DisplayServer.screen_get_size(screen)
+		var window_size := DisplayServer.window_get_size()
+		DisplayServer.window_set_position(screen_position + (screen_size - window_size) / 2)
+
+	_populate_resolution_options()
+
+
+func _populate_resolution_options() -> void:
+	_resolution_options.clear()
+	for size in [
+		Vector2i(1280, 720),
+		Vector2i(1600, 900),
+		Vector2i(1920, 1080),
+		Vector2i(2560, 1440),
+		Vector2i(3840, 2160),
+	]:
+		_add_resolution_option(size)
+
+	_add_resolution_option(DisplayServer.screen_get_size())
+	_add_resolution_option(DisplayServer.window_get_size())
+	_resolution_options.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return a.x * a.y < b.x * b.y)
+
+	_resolution_option.clear()
+	var current_size := DisplayServer.window_get_size()
+	var selected_index := 0
+	for index in _resolution_options.size():
+		var size := _resolution_options[index]
+		_resolution_option.add_item("%d x %d" % [size.x, size.y])
+		if size == current_size:
+			selected_index = index
+	_resolution_option.select(selected_index)
+
+
+func _add_resolution_option(size: Vector2i) -> void:
+	if size.x <= 0 or size.y <= 0:
+		return
+	for existing in _resolution_options:
+		if existing == size:
+			return
+	_resolution_options.append(size)
+
+
+func _set_resolution(index: int) -> void:
+	if index < 0 or index >= _resolution_options.size():
+		return
+	var size := _resolution_options[index]
+	DisplayServer.window_set_size(size)
+	get_viewport().content_scale_size = size
 
 
 func _set_master_volume(value: float) -> void:
